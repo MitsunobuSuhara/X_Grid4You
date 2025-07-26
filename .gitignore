@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Inno Setup
+installer/
+*.iss
+
+# OS generated files
+.DS_Store
+Thumbs.db
