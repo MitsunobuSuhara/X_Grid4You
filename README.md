@@ -1,6 +1,6 @@
 # X-Grid & X-Grid Styler
 
-**国有林の現場で使われる「平均集材距離計算表」を、DX化したシステムです。**
+**国有林で使われる「平均集材距離計算表」を、DX化したシステムです。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
