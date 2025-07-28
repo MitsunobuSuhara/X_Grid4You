@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-![X-Grid アプリケーションのスクリーンショット](https://raw.githubusercontent.com/MitsunobuSuhara/X_Grid4You/main/images/X_Grid-Image.png) 
+![X-Grid アプリケーションのスクリーンショット](https://raw.githubusercontent.com/MitsunobuSuhara/X_Grid4You/main/images/sample.png) 
 
 `X-Grid`は、スタンドアロンで動作するデスクトップアプリケーションです。伐採区域などのベクターデータを読み込み、地図上で土場及び区域の入口を指定することにより、平均集材距離を自動で算出します。計算結果は、計算過程がひと目でわかる図としてPDFに出力できます。
 
