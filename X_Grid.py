@@ -143,7 +143,11 @@ class X_Grid(QMainWindow):
         self.Z_GRID = 0 
         self.Z_DATA_LAYERS_BASE = 1
         self.Z_AREA_OUTLINE = 50
-        self.Z_OVERLAYS_BASE = 100 
+        self.Z_OVERLAYS_BASE = 100
+        
+        # ★修正箇所1: 状態管理フラグを追加
+        self.calculation_results_visible = False
+
         self._setup_drawing_styles()
         self.init_ui()
 
@@ -622,39 +626,60 @@ class X_Grid(QMainWindow):
     def _get_feature_style(self, feature, layer_info):
         props = feature.get('properties', {})
         final_style = DEFAULT_STYLE_INFO.copy()
+        
         fill_color_prop = props.get('fill_color')
         if fill_color_prop is not None:
             prop_val_str = str(fill_color_prop).strip()
-            if not prop_val_str: final_style['fill_color'] = QColor(Qt.GlobalColor.transparent)
+            if not prop_val_str: 
+                final_style['fill_color'] = QColor(Qt.GlobalColor.transparent)
             else:
                 new_color = _parse_any_color_string(prop_val_str)
-                if new_color.isValid(): final_style['fill_color'] = new_color
-        line_color_prop = props.get('strk_color') or props.get('stroke_color') or props.get('color')
-        if line_color_prop is not None:
-            new_line_color = _parse_any_color_string(line_color_prop)
-            if new_line_color.isValid(): final_style['line_color'] = new_line_color
-        line_width_prop = props.get('strk_width') or props.get('stroke_width')
-        if line_width_prop is not None:
-            try: final_style['line_width'] = float(line_width_prop)
-            except (ValueError, TypeError): pass
+                if new_color.isValid(): 
+                    final_style['fill_color'] = new_color
+
         style_key = props.get('strk_style') or props.get('stroke_dash_type') or props.get('stroke_style')
         if style_key is not None:
-            style_val, pen_style_map = str(style_key).lower(), {'solid': Qt.PenStyle.SolidLine, 'dot': Qt.PenStyle.DotLine, 'dash': Qt.PenStyle.DashLine, 'dashdot': Qt.PenStyle.DashDotLine, 'dashdotdot': Qt.PenStyle.DashDotDotLine, 'custom': Qt.PenStyle.CustomDashLine, 'none': Qt.PenStyle.NoPen, 'no': Qt.PenStyle.NoPen}
+            style_val = str(style_key).lower()
+            pen_style_map = {
+                'solid': Qt.PenStyle.SolidLine, 'dot': Qt.PenStyle.DotLine,
+                'dash': Qt.PenStyle.DashLine, 'dashdot': Qt.PenStyle.DashDotLine,
+                'dashdotdot': Qt.PenStyle.DashDotDotLine, 'custom': Qt.PenStyle.CustomDashLine,
+                'none': Qt.PenStyle.NoPen, 'no': Qt.PenStyle.NoPen
+            }
             final_style['pen_style'] = pen_style_map.get(style_val, Qt.PenStyle.SolidLine)
-        pattern_prop = props.get('dash_pattn') or props.get('dash_pattern')
-        if final_style.get('pen_style') == Qt.PenStyle.CustomDashLine and pattern_prop:
-            final_style['dash_pattern'] = []
-            try:
-                pattern_str = str(pattern_prop).strip().replace('[','').replace(']','')
-                scale_factor = final_style.get('line_width', 1.0)
-                pattern_list = [float(p.strip()) * scale_factor for p in pattern_str.split(',')]
-                if pattern_list: final_style['dash_pattern'] = pattern_list
-            except (ValueError, TypeError, AttributeError):
-                final_style['dash_pattern'], final_style['pen_style'] = [], Qt.PenStyle.SolidLine
+
+        if final_style['pen_style'] != Qt.PenStyle.NoPen:
+            line_color_prop = props.get('strk_color') or props.get('stroke_color') or props.get('color')
+            if line_color_prop is not None:
+                new_line_color = _parse_any_color_string(str(line_color_prop))
+                if new_line_color.isValid(): 
+                    final_style['line_color'] = new_line_color
+            
+            line_width_prop = props.get('strk_width') or props.get('stroke_width')
+            if line_width_prop is not None:
+                try: 
+                    final_style['line_width'] = float(line_width_prop)
+                except (ValueError, TypeError): 
+                    pass
+            
+            pattern_prop = props.get('dash_pattn') or props.get('dash_pattern')
+            if final_style.get('pen_style') == Qt.PenStyle.CustomDashLine and pattern_prop:
+                final_style['dash_pattern'] = []
+                try:
+                    pattern_str = str(pattern_prop).strip().replace('[','').replace(']','')
+                    scale_factor = final_style.get('line_width', 1.0)
+                    pattern_list = [float(p.strip()) * scale_factor for p in pattern_str.split(',')]
+                    if pattern_list: 
+                        final_style['dash_pattern'] = pattern_list
+                except (ValueError, TypeError, AttributeError):
+                    final_style['dash_pattern'] = []
+                    final_style['pen_style'] = Qt.PenStyle.SolidLine
+
         current_fill_color = final_style['fill_color']
         if current_fill_color.alpha() != 0:
             current_fill_color.setAlpha(100)
             final_style['fill_color'] = current_fill_color
+            
         return final_style
 
     def auto_fit_view(self):
@@ -684,19 +709,38 @@ class X_Grid(QMainWindow):
                 self.pointer_item.setZValue(self.Z_OVERLAYS_BASE + 2)
                 self.clear_calculation_results()
 
+    # ★修正箇所2: グリッド描画関数を動的に変更
     def draw_grid(self):
         for item in self.grid_items:
             if item.scene(): self.scene.removeItem(item)
         self.grid_items.clear()
-        pen = QPen(QColor(220, 220, 222)); pen.setCosmetic(False)
+        
+        pen = QPen(QColor(220, 220, 222))
+        pen.setCosmetic(False)
+
+        end_x = self.grid_offset_x + self.grid_cols * self.cell_size_on_screen
+        end_y = self.grid_offset_y + self.grid_rows * self.cell_size_on_screen
+
+        if self.calculation_results_visible:
+            v_table_gap = 5
+            v_table_col_widths = [40, 35, 45]
+            end_x += v_table_gap + sum(v_table_col_widths)
+            
+            h_table_gap = 5
+            h_table_row_heights = [50, 40, 50]
+            end_y += h_table_gap + sum(h_table_row_heights)
+        
         for r in range(self.grid_rows + 1):
             y = self.grid_offset_y + r * self.cell_size_on_screen
-            line = self.scene.addLine(self.grid_offset_x, y, self.grid_offset_x + self.grid_cols * self.cell_size_on_screen, y, pen)
-            line.setZValue(self.Z_GRID); self.grid_items.append(line)
+            line = self.scene.addLine(self.grid_offset_x, y, end_x, y, pen)
+            line.setZValue(self.Z_GRID)
+            self.grid_items.append(line)
+
         for c in range(self.grid_cols + 1):
             x = self.grid_offset_x + c * self.cell_size_on_screen
-            line = self.scene.addLine(x, self.grid_offset_y, x, self.grid_offset_y + self.grid_rows * self.cell_size_on_screen, pen)
-            line.setZValue(self.Z_GRID); self.grid_items.append(line)
+            line = self.scene.addLine(x, self.grid_offset_y, x, end_y, pen)
+            line.setZValue(self.Z_GRID)
+            self.grid_items.append(line)
 
     def draw_compass(self):
         for item in self.compass_items:
@@ -769,10 +813,15 @@ class X_Grid(QMainWindow):
         self.in_area_cells_outline = self.scene.addPath(outline_path, outline_pen)
         self.in_area_cells_outline.setZValue(self.Z_AREA_OUTLINE)
 
+    # ★修正箇所3: 結果クリア時にフラグをリセットし、グリッドを再描画
     def clear_calculation_results(self):
         for item in self.calculation_items + self.result_text_items + self.title_items:
             if item.scene(): self.scene.removeItem(item)
         self.calculation_items.clear(); self.result_text_items.clear(); self.title_items.clear()
+        
+        if self.calculation_results_visible:
+            self.calculation_results_visible = False
+            self.draw_grid()
 
     def update_title_display(self):
         for item in self.title_items:
@@ -787,16 +836,24 @@ class X_Grid(QMainWindow):
             underline_y, line1, line2 = y_pos + rect.height(), self.scene.addLine(self.grid_offset_x, y_pos + rect.height() + 1, self.grid_offset_x + QFontMetrics(title_font).horizontalAdvance(subtitle_text), y_pos + rect.height() + 1, QPen(self.colors['dark'])), self.scene.addLine(self.grid_offset_x, y_pos + rect.height() + 3, self.grid_offset_x + QFontMetrics(title_font).horizontalAdvance(subtitle_text), y_pos + rect.height() + 3, QPen(self.colors['dark']))
             self.title_items.extend([line1, line2])
 
+    # ★修正箇所4: 計算実行時にフラグをセットし、グリッドを再描画
     def run_calculation_and_draw(self):
-        self.clear_calculation_results(); self.update_area_outline()
+        self.clear_calculation_results()
+        self.update_area_outline()
+        
         in_area_cells = self.get_in_area_cells()
         if not in_area_cells: QMessageBox.warning(self, "警告", "計算対象の区域がありません。レイヤ管理リストでポリゴンレイヤにチェックを入れてください。"); return
         if not self.landing_cell: QMessageBox.warning(self, "警告", "土場の位置が選択されていません。"); return
+        
+        self.calculation_results_visible = True
+        self.draw_grid()
+
         debug_pen, debug_brush = QPen(QColor("darkgray")), QBrush(QColor("darkgray"))
         for r, c in in_area_cells:
             center_x, center_y = self.grid_offset_x + c * self.cell_size_on_screen + self.cell_size_on_screen / 2, self.grid_offset_y + r * self.cell_size_on_screen + self.cell_size_on_screen / 2
             marker = self.scene.addRect(center_x - 1, center_y - 1, 2, 2, debug_pen, debug_brush)
             marker.setZValue(self.Z_AREA_OUTLINE + 1); self.calculation_items.append(marker)
+        
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             landing_row, landing_col = self.landing_cell
@@ -806,7 +863,9 @@ class X_Grid(QMainWindow):
             total_degree, final_distance = len(in_area_cells), (total_product_v + total_product_h) / len(in_area_cells) * self.k_value if len(in_area_cells) > 0 else 0
             all_rows, all_cols = [r for r, c in in_area_cells] if in_area_cells else [], [c for r, c in in_area_cells] if in_area_cells else []
             calc_data = {"landing_row": landing_row, "landing_col": landing_col, "row_counts": row_counts, "col_counts": col_counts, "total_product_v": total_product_v, "total_product_h": total_product_h, "total_degree": total_degree, "final_distance": final_distance, "min_row": min(all_rows) if all_rows else 0, "max_row": max(all_rows) if all_rows else 0, "min_col": min(all_cols) if all_cols else 0, "max_col": max(all_cols) if all_cols else 0, "subtitle": self.subtitle_input.text().strip()}
-            self._draw_calculation_header(calc_data); self._draw_final_result(calc_data); self._draw_calculation_tables(calc_data)
+            self._draw_calculation_header(calc_data)
+            self._draw_final_result(calc_data)
+            self._draw_calculation_tables(calc_data)
             self.auto_fit_view()
         except Exception as e: QMessageBox.critical(self, "エラー", f"計算または描画中にエラーが発生しました: {e}")
         finally: QApplication.restoreOverrideCursor()
@@ -855,8 +914,49 @@ class X_Grid(QMainWindow):
             self._add_aligned_text(int_dist_str, self.fonts['result'], self.colors['normal'], QPointF(result_align_x, second_line_y), Qt.AlignmentFlag.AlignLeft, is_result=True)
         for item in self.result_text_items: item.setZValue(self.Z_OVERLAYS_BASE + 20)
 
+    # ★修正箇所5: 計算表の枠線描画を追加
     def _draw_calculation_tables(self, calc_data):
         v_table_x, col_widths_v, h_table_y, row_heights_h = self.grid_offset_x + self.grid_cols * self.cell_size_on_screen + 5, [40, 35, 45], self.grid_offset_y + self.grid_rows * self.cell_size_on_screen + 5, [50, 40, 50]
+        
+        pen = QPen(QColor(180, 180, 180))
+        pen.setCosmetic(False)
+
+        v_table_y_end = self.grid_offset_y + self.grid_rows * self.cell_size_on_screen
+        current_x = v_table_x
+        for w in col_widths_v:
+            item = self.scene.addLine(current_x, self.grid_offset_y, current_x, v_table_y_end, pen)
+            self.calculation_items.append(item)
+            current_x += w
+        item = self.scene.addLine(current_x, self.grid_offset_y, current_x, v_table_y_end, pen)
+        self.calculation_items.append(item)
+
+        h_table_x_end = self.grid_offset_x + self.grid_cols * self.cell_size_on_screen
+        current_y = h_table_y
+        for h in row_heights_h:
+            item = self.scene.addLine(self.grid_offset_x, current_y, h_table_x_end, current_y, pen)
+            self.calculation_items.append(item)
+            current_y += h
+        item = self.scene.addLine(self.grid_offset_x, current_y, h_table_x_end, current_y, pen)
+        self.calculation_items.append(item)
+
+        summary_box_x_end = v_table_x + sum(col_widths_v)
+        summary_box_y_end = h_table_y + sum(row_heights_h)
+        current_x = v_table_x
+        for w in col_widths_v:
+            item = self.scene.addLine(current_x, h_table_y, current_x, summary_box_y_end, pen)
+            self.calculation_items.append(item)
+            current_x += w
+        item = self.scene.addLine(current_x, h_table_y, current_x, summary_box_y_end, pen)
+        self.calculation_items.append(item)
+        
+        current_y = h_table_y
+        for h in row_heights_h:
+            item = self.scene.addLine(v_table_x, current_y, summary_box_x_end, current_y, pen)
+            self.calculation_items.append(item)
+            current_y += h
+        item = self.scene.addLine(v_table_x, current_y, summary_box_x_end, current_y, pen)
+        self.calculation_items.append(item)
+        
         headers_v_data, current_x = [("①", "走行\n(縦)\n距離"), ("②", "度数"), ("③", "①×②")], v_table_x
         for i, (num, text) in enumerate(headers_v_data):
             self._add_aligned_text(num, self.fonts['header'], self.colors['normal'], QPointF(current_x + col_widths_v[i] / 2, self.grid_offset_y - 110 + 15), Qt.AlignmentFlag.AlignHCenter)
@@ -864,10 +964,8 @@ class X_Grid(QMainWindow):
             current_x += col_widths_v[i]
         for r in range(self.grid_rows):
             if not (calc_data['min_row'] <= r <= calc_data['max_row']) and r != calc_data['landing_row']: continue
-            # ★★★ ここからが修正箇所 ★★★
             is_hl = (r == calc_data['landing_row'])
             font, color = (self.fonts['highlight'], self.colors['highlight']) if is_hl else (self.fonts['data'], self.colors['normal'])
-            # ★★★ 修正ここまで ★★★
             count, vals, current_x = calc_data['row_counts'].get(r, 0), [abs(r - calc_data['landing_row']), calc_data['row_counts'].get(r, 0), abs(r - calc_data['landing_row']) * calc_data['row_counts'].get(r, 0)], v_table_x
             for i, val in enumerate(vals): self._add_aligned_text(str(val), font, color, QPointF(current_x + col_widths_v[i]/2, self.grid_offset_y + r * self.cell_size_on_screen + self.cell_size_on_screen/2)); current_x += col_widths_v[i]
         headers_h_data, current_y = [("④", "走行\n(横)距離"), ("⑤", "度数"), ("⑥", "④×⑤")], h_table_y
@@ -877,10 +975,8 @@ class X_Grid(QMainWindow):
             current_y += row_heights_h[i]
         for c in range(self.grid_cols):
             if not (calc_data['min_col'] <= c <= calc_data['max_col']) and c != calc_data['landing_col']: continue
-            # ★★★ ここからが修正箇所 ★★★
             is_hl = (c == calc_data['landing_col'])
             font, color = (self.fonts['highlight'], self.colors['highlight']) if is_hl else (self.fonts['data'], self.colors['normal'])
-            # ★★★ 修正ここまで ★★★
             count, vals, current_y = calc_data['col_counts'].get(c, 0), [abs(c - calc_data['landing_col']), calc_data['col_counts'].get(c, 0), abs(c - calc_data['landing_col']) * calc_data['col_counts'].get(c, 0)], h_table_y
             for i, val in enumerate(vals): self._add_aligned_text(str(val), font, color, QPointF(self.grid_offset_x + c * self.cell_size_on_screen + self.cell_size_on_screen/2, current_y + row_heights_h[i]/2)); current_y += row_heights_h[i]
         total_cells_data = [("合計", None, v_table_x, h_table_y, col_widths_v[0], row_heights_h[0]), ("⑧", str(calc_data['total_degree']), v_table_x, h_table_y + row_heights_h[0], col_widths_v[0], row_heights_h[1]), ("⑦", str(calc_data['total_product_h']), v_table_x, h_table_y + sum(row_heights_h[:2]), col_widths_v[0], row_heights_h[2]), ("⑧", str(calc_data['total_degree']), v_table_x + col_widths_v[0], h_table_y, col_widths_v[1], row_heights_h[0]), ("⑨", str(calc_data['total_product_v']), v_table_x + sum(col_widths_v[:2]), h_table_y, col_widths_v[2], row_heights_h[0])]

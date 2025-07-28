@@ -1,0 +1,10 @@
+# ファイル名: metadata.txt
+
+[general]
+name=X_Grid Styler
+description=X_Gridで読み込むためのスタイル属性を書き出すプラグイン
+version=1.1.0
+qgisMinimumVersion=3.4
+author=Mitsunobu Suhara + ChatGPT
+email=your_email@example.com
+category=Vector
