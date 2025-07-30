@@ -65,8 +65,46 @@ class LayerSelectionDialog(QDialog):
     def get_selected_layers(self):
         return [cb.text() for cb in self.checkboxes if cb.isChecked()]
 
+class DroppableListWidget(QListWidget):
+    filesDropped = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and any(
+            url.toLocalFile().lower().endswith(('.shp', '.gpkg'))
+            for url in event.mimeData().urls()
+        ):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls() and any(
+            url.toLocalFile().lower().endswith(('.shp', '.gpkg'))
+            for url in event.mimeData().urls()
+        ):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        valid_paths = [
+            url.toLocalFile() for url in urls
+            if url.toLocalFile().lower().endswith(('.shp', '.gpkg'))
+        ]
+        if valid_paths:
+            self.filesDropped.emit(valid_paths)
+
+
 class MyGraphicsView(QGraphicsView):
-    sceneClicked = pyqtSignal(QPointF); viewZoomed = pyqtSignal()
+    sceneClicked = pyqtSignal(QPointF)
+    viewZoomed = pyqtSignal()
+    filesDropped = pyqtSignal(list)
+
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
@@ -75,6 +113,34 @@ class MyGraphicsView(QGraphicsView):
         self.is_panning = False
         self.last_pan_point = QPoint()
         self.main_window = parent
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and any(
+            url.toLocalFile().lower().endswith(('.shp', '.gpkg'))
+            for url in event.mimeData().urls()
+        ):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls() and any(
+            url.toLocalFile().lower().endswith(('.shp', '.gpkg'))
+            for url in event.mimeData().urls()
+        ):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        valid_paths = [
+            url.toLocalFile() for url in urls
+            if url.toLocalFile().lower().endswith(('.shp', '.gpkg'))
+        ]
+        if valid_paths:
+            self.filesDropped.emit(valid_paths)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -145,12 +211,11 @@ class X_Grid(QMainWindow):
         self.Z_AREA_OUTLINE = 50
         self.Z_OVERLAYS_BASE = 100
         
-        # ★修正箇所1: 状態管理フラグを追加
         self.calculation_results_visible = False
 
         self._setup_drawing_styles()
         self.init_ui()
-
+        
     def init_ui(self):
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
@@ -169,7 +234,8 @@ class X_Grid(QMainWindow):
             b { color: #000000; }
         </style>
         <ol>
-            <li><b>「レイヤ追加」</b> でファイル(.shp / .gpkg)選択</li>
+            <li><b>「レイヤ追加」</b>ボタンから　or <b>ベクタファイル</b>を直接<b>ドラッグ&ドロップ</b></li>
+	　 <li><b>  レイヤ管理のリスト</b>から計算したいポリゴンを選択</li>	
             <li><b>  "土場か区域の入口"</b> を地図上でクリック</li>
             <li><b>「計算を実行」</b> ボタンで計算結果を表示</li>
             <li><b>  "林小班名等"</b>を入力し、<b>「表示」</b>を押す</li>
@@ -190,7 +256,7 @@ class X_Grid(QMainWindow):
         left_panel_layout.addWidget(separator1)
         
         layer_management_label = QLabel("<b>レイヤ管理 (リストの上が最前面)</b>")
-        self.layer_list_widget = QListWidget()
+        self.layer_list_widget = DroppableListWidget()
         layer_buttons_layout = QHBoxLayout()
         self.add_layer_button = QPushButton("レイヤ追加")
         self.remove_layer_button = QPushButton("削除")
@@ -310,32 +376,40 @@ class X_Grid(QMainWindow):
         self.export_button.clicked.connect(self.export_results)
         self.update_title_button.clicked.connect(self.update_title_display)
         self.subtitle_input.returnPressed.connect(self.update_title_display)
+
+        self.view.filesDropped.connect(self.handle_dropped_files)
+        self.layer_list_widget.filesDropped.connect(self.handle_dropped_files)
+
         self.draw_grid()
 
     def prompt_add_layer(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "ベクターファイルを選択", "", "ベクターファイル (*.gpkg *.shp)")
-        if not file_path: return
-        
+        if not file_path:
+            return
+        self._handle_file_addition(file_path)
+
+    def handle_dropped_files(self, file_paths):
+        for file_path in file_paths:
+            self._handle_file_addition(file_path)
+
+    def _handle_file_addition(self, file_path):
         layer_names_to_add = []
         try:
             if file_path.lower().endswith('.shp'):
-                layer_names_to_add = [None] 
+                layer_names_to_add = [None]
             elif file_path.lower().endswith('.gpkg'):
                 all_layer_names = fiona.listlayers(file_path)
                 dialog = LayerSelectionDialog(all_layer_names, self)
-                if dialog.exec(): 
+                if dialog.exec():
                     layer_names_to_add = dialog.get_selected_layers()
-                else: 
+                else:
                     return
-            else:
-                layer_names_to_add = fiona.listlayers(file_path)
 
-        except Exception as e: 
+        except Exception as e:
             QMessageBox.critical(self, "エラー", f"ファイルからレイヤリストを取得できませんでした。\n\n詳細: {e}")
             return
 
-        if not layer_names_to_add: 
-            QMessageBox.warning(self, "警告", "ファイルから読み込み可能なレイヤが見つかりませんでした。")
+        if not layer_names_to_add:
             return
 
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -344,10 +418,11 @@ class X_Grid(QMainWindow):
                 self.map_offset_x = 0.0
                 self.map_offset_y = 0.0
                 self.update_layout_and_redraw()
-        except Exception as e: 
+        except Exception as e:
             QMessageBox.critical(self, "エラー", f"レイヤ追加処理中にエラー: {e}")
-        finally: 
+        finally:
             QApplication.restoreOverrideCursor()
+
 
     def add_layers_from_file(self, file_path, layer_names):
         new_layers_added = False
@@ -395,12 +470,18 @@ class X_Grid(QMainWindow):
         self.layer_list_widget.blockSignals(False)
         return new_layers_added
     
+    ### ▼ 修正箇所 ▼ ###
     def remove_selected_layer(self):
         current_row = self.layer_list_widget.currentRow()
         if current_row < 0: return
         self.layers.pop(current_row)
         self.layer_list_widget.takeItem(current_row)
+        
+        # レイヤ削除は計算結果を無効にするため、クリア処理を呼び出す
+        self.clear_calculation_results()
+
         self.update_layout_and_redraw()
+    ### ▲ 修正箇所 ▲ ###
 
     def move_layer_up(self):
         current_row = self.layer_list_widget.currentRow()
@@ -709,7 +790,6 @@ class X_Grid(QMainWindow):
                 self.pointer_item.setZValue(self.Z_OVERLAYS_BASE + 2)
                 self.clear_calculation_results()
 
-    # ★修正箇所2: グリッド描画関数を動的に変更
     def draw_grid(self):
         for item in self.grid_items:
             if item.scene(): self.scene.removeItem(item)
@@ -813,7 +893,6 @@ class X_Grid(QMainWindow):
         self.in_area_cells_outline = self.scene.addPath(outline_path, outline_pen)
         self.in_area_cells_outline.setZValue(self.Z_AREA_OUTLINE)
 
-    # ★修正箇所3: 結果クリア時にフラグをリセットし、グリッドを再描画
     def clear_calculation_results(self):
         for item in self.calculation_items + self.result_text_items + self.title_items:
             if item.scene(): self.scene.removeItem(item)
@@ -836,7 +915,6 @@ class X_Grid(QMainWindow):
             underline_y, line1, line2 = y_pos + rect.height(), self.scene.addLine(self.grid_offset_x, y_pos + rect.height() + 1, self.grid_offset_x + QFontMetrics(title_font).horizontalAdvance(subtitle_text), y_pos + rect.height() + 1, QPen(self.colors['dark'])), self.scene.addLine(self.grid_offset_x, y_pos + rect.height() + 3, self.grid_offset_x + QFontMetrics(title_font).horizontalAdvance(subtitle_text), y_pos + rect.height() + 3, QPen(self.colors['dark']))
             self.title_items.extend([line1, line2])
 
-    # ★修正箇所4: 計算実行時にフラグをセットし、グリッドを再描画
     def run_calculation_and_draw(self):
         self.clear_calculation_results()
         self.update_area_outline()
@@ -914,7 +992,6 @@ class X_Grid(QMainWindow):
             self._add_aligned_text(int_dist_str, self.fonts['result'], self.colors['normal'], QPointF(result_align_x, second_line_y), Qt.AlignmentFlag.AlignLeft, is_result=True)
         for item in self.result_text_items: item.setZValue(self.Z_OVERLAYS_BASE + 20)
 
-    # ★修正箇所5: 計算表の枠線描画を追加
     def _draw_calculation_tables(self, calc_data):
         v_table_x, col_widths_v, h_table_y, row_heights_h = self.grid_offset_x + self.grid_cols * self.cell_size_on_screen + 5, [40, 35, 45], self.grid_offset_y + self.grid_rows * self.cell_size_on_screen + 5, [50, 40, 50]
         
