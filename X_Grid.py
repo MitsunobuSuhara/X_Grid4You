@@ -758,7 +758,7 @@ class X_Grid(QMainWindow):
 
         current_fill_color = final_style['fill_color']
         if current_fill_color.alpha() != 0:
-            current_fill_color.setAlpha(100)
+            current_fill_color.setAlpha(200)
             final_style['fill_color'] = current_fill_color
             
         return final_style
